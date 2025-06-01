@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Job Application Tracker</title>
+    <style>
+        body { font-family: Arial; max-width: 800px; margin: 0 auto; padding: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .add-form { margin: 20px 0; background: #f9f9f9; padding: 15px; border-radius: 5px; }
+        input, select { padding: 8px; margin: 5px 0; width: 100%; }
+        button { padding: 8px 15px; background: #4CAF50; color: white; border: none; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Job Application Tracker</h1>
+    
+    <div class="add-form">
+        <h2>Add New Application</h2>
+        <input type="text" id="company" placeholder="Company Name">
+        <input type="text" id="position" placeholder="Position">
+        <input type="date" id="appliedDate">
+        <select id="status">
+            <option value="Applied">Applied</option>
+            <option value="Interviewing">Interviewing</option>
+            <option value="Offer">Offer</option>
+            <option value="Rejected">Rejected</option>
+        </select>
+        <button onclick="addApplication()">Add Application</button>
+    </div>
+
+    <table id="applicationsTable">
+        <thead>
+            <tr>
+                <th>Company</th>
+                <th>Position</th>
+                <th>Date Applied</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="applicationsBody">
+            <!-- Applications will appear here -->
+        </tbody>
+    </table>
+
+    <script>
+        // Load saved applications
+        let applications = JSON.parse(localStorage.getItem('jobApplications')) || [];
+        
+        function renderApplications() {
+            const tbody = document.getElementById('applicationsBody');
+            tbody.innerHTML = '';
+            
+            applications.forEach((app, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${app.company}</td>
+                    <td>${app.position}</td>
+                    <td>${app.appliedDate}</td>
+                    <td>${app.status}</td>
+                    <td>
+                        <button onclick="deleteApplication(${index})">Delete</button>
+                        <select onchange="updateStatus(${index}, this.value)">
+                            <option ${app.status === 'Applied' ? 'selected' : ''}>Applied</option>
+                            <option ${app.status === 'Interviewing' ? 'selected' : ''}>Interviewing</option>
+                            <option ${app.status === 'Offer' ? 'selected' : ''}>Offer</option>
+                            <option ${app.status === 'Rejected' ? 'selected' : ''}>Rejected</option>
+                        </select>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        function addApplication() {
+            const company = document.getElementById('company').value;
+            const position = document.getElementById('position').value;
+            const appliedDate = document.getElementById('appliedDate').value;
+            const status = document.getElementById('status').value;
+            
+            applications.push({ company, position, appliedDate, status });
+            localStorage.setItem('jobApplications', JSON.stringify(applications));
+            
+            // Clear form
+            document.getElementById('company').value = '';
+            document.getElementById('position').value = '';
+            
+            renderApplications();
+        }
+        
+        function deleteApplication(index) {
+            applications.splice(index, 1);
+            localStorage.setItem('jobApplications', JSON.stringify(applications));
+            renderApplications();
+        }
+        
+        function updateStatus(index, newStatus) {
+            applications[index].status = newStatus;
+            localStorage.setItem('jobApplications', JSON.stringify(applications));
+            renderApplications();
+        }
+        
+        // Initial render
+        renderApplications();
+    </script>
+</body>
+</html>
