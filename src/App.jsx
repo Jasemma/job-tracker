@@ -33,201 +33,155 @@ const db          = getFirestore(firebaseApp);
 /* ------------------------------------------------------------------
    CSV helpers
 -------------------------------------------------------------------*/
-const toCSV = (rows) => {
-  const head   = ['company', 'position', 'date', 'status', 'notes'];
-  const escape = (v) => `${v}`.replaceAll('"', '""');
-  return head.join(',') + '\n' + rows
-    .map(r => head.map(h => `"${escape(r[h] ?? '')}"`).join(','))
-    .join('\n');
-};
+const CSV_HEADERS = [
+  'company',
+  'position',
+  'date',
+  'location',
+  'agent',
+  'status',
+  'requirements',
+  'optionalRequirements',
+  'benefits',
+  'fullDescription',
+  'notes',
+];
+const esc  = (v)=>String(v).replace(/"/g,'""').replace(/\n/g,'\\n');
+const toCsv = rows => CSV_HEADERS.join(',')+'\n'+rows.map(r=>CSV_HEADERS.map(c=>`"${esc(r[c]??'')}"`).join(',')).join('\n');
+const parseCsv = str => {const [h,...ls]=str.trim().split(/\r?\n/);const head=h.split(',');return ls.map(l=>{const cells=l.match(/"(?:[^"]|"{2})*"|[^,]+/g).map(c=>c.replace(/^"|"$/g,'').replace(/""/g,'"').replace(/\\n/g,'\n'));const o={};head.forEach((k,i)=>o[k]=cells[i]||'');o.id=Date.now()+Math.random();return o;});};
 
-const fromCSV = (text) => {
-  const [header, ...lines] = text.trim().split(/\r?\n/);
-  const headers = header.split(',');
-  return lines.map(line => {
-    const cols = line.match(/\"(?:[^\"]|\"\")*\"|[^,]+/g)
-      .map(c => c.replace(/^\"|\"$/g, '').replace(/\"\"/g, '"'));
-    const obj = {};
-    headers.forEach((h, i) => (obj[h] = cols[i] || ''));
-    obj.id = Date.now() + Math.random();
-    return obj;
-  });
-};
+export default function App(){
+  // state
+  const blank={company:'',position:'',date:'',location:'remote',agent:'no',status:'Applied',requirements:'',optionalRequirements:'',benefits:'',fullDescription:'',notes:'',id:null};
+  const[apps,setApps]=useState([]);
+  const[form,setForm]=useState(blank);
+  const[edit,setEdit]=useState(false);
+  const[user,setUser]=useState(null);
+  const[expanded,setExpanded]=useState(null);
+  const fileInput=useRef();
+  const ready=useRef(false);
+  const LS='jobApplications';
 
-export default function App() {
-  const blank = { company: '', position: '', date: '', status: 'Applied', notes: '', id: null };
+  // auth load
+  useEffect(()=>{const unsub=onAuthStateChanged(auth,async u=>{setUser(u);const local=JSON.parse(localStorage.getItem(LS)||'[]');const cloud=u?await getDoc(doc(db,'applications',u.uid)).then(s=>s.exists()?s.data().items:[]):[];setApps(cloud.length?cloud:local);ready.current=true;});return unsub;},[]);
+  useEffect(()=>{if(!ready.current) return;user?setDoc(doc(db,'applications',user.uid),{items:apps}):localStorage.setItem(LS,JSON.stringify(apps));},[apps,user]);
 
-  const [apps,  setApps]  = useState([]);
-  const [form,  setForm]  = useState(blank);
-  const [edit,  setEdit]  = useState(false);
-  const [user,  setUser]  = useState(null);
+  // service worker
+  useEffect(()=>{'serviceWorker' in navigator && navigator.serviceWorker.register('/service-worker.js').catch(console.error);},[]);
 
-  const fileRef       = useRef();
-  const readyToSave   = useRef(false);   // NEW – prevents premature overwrite
-  const LS_KEY        = 'jobApplications';
+  // handlers
+  const handleChange=e=>setForm({...form,[e.target.name]:e.target.value});
+  const handleSubmit=e=>{e.preventDefault();if(!form.company||!form.position) return;edit?setApps(apps.map(a=>a.id===form.id?form:a)):setApps([...apps,{...form,id:Date.now()}]);setForm(blank);setEdit(false);};
+  const startEdit=a=>{setForm(a);setEdit(true);window.scrollTo({top:0,behavior:'smooth'});} ;
+  const del=id=>{setApps(apps.filter(a=>a.id!==id));if(edit&&id===form.id){setForm(blank);setEdit(false);}}
+  const clearAll=()=>{if(confirm('Clear all?')){setApps([]);user&&setDoc(doc(db,'applications',user.uid),{items:[]});localStorage.removeItem(LS);}};
+  const exportCsv=()=>{const blob=new Blob([toCsv(apps)],{type:'text/csv'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='applications.csv';a.click();URL.revokeObjectURL(url);} ;
+  const importCsv=e=>{const f=e.target.files[0];if(!f) return;const r=new FileReader();r.onload=ev=>setApps(p=>[...p,...parseCsv(ev.target.result)]);r.readAsText(f);e.target.value=null;};
 
-  /* ---------------- Authentication ---------------- */
-  const signIn   = () => signInWithPopup(auth, new GoogleAuthProvider());
-  const doSignOut = () => signOut(auth);
+  // helpers
+  const bulletList=txt=>txt&&<ul className="list-disc list-inside mt-1 text-sm text-[#4e1d2e]">{txt.split(/\r?\n/).filter(Boolean).map((l,i)=><li key={i}>{l.trim()}</li>)}</ul>;
 
-  /* ------------- Cloud helpers ------------- */
-  const saveCloud = (uid, data) => setDoc(doc(db, 'applications', uid), { items: data });
-  const loadCloud = async (uid) => {
-    const snap = await getDoc(doc(db, 'applications', uid));
-    return snap.exists() ? snap.data().items : [];
-  };
+  // palette from reference image
+  const bgLight="#f7f3f5"; // near-cream
+  const bgDark="#321221"; // deep burgundy
+  const accent="#5c2439"; // mid burgundy
+  const softCard="rgba(255,255,255,0.6)";
 
-  /* ---------------- Initial load ---------------- */
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      setUser(u);
-      const local = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
-
-      if (u) {
-        // Fetch remote list *before* we allow saves
-        const remote = await loadCloud(u.uid);
-        setApps(remote.length ? remote : local);
-      } else {
-        setApps(local);
-      }
-
-      // Only after state is populated do we allow writes
-      readyToSave.current = true;
-    });
-    return unsub;
-  }, []);
-
-  /* ---------------- Persist (local or cloud) ---------------- */
-  useEffect(() => {
-    if (!readyToSave.current) return; // skip first run when data not loaded yet
-
-    if (user) {
-      saveCloud(user.uid, apps);
-    } else {
-      localStorage.setItem(LS_KEY, JSON.stringify(apps));
-    }
-  }, [apps, user]);
-
-  /* ---------------- PWA service‑worker ---------------- */
-  useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/service-worker.js').catch(console.error);
-    }
-  }, []);
-
-  /* ---------------- Form handlers ---------------- */
-  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!form.company || !form.position) return;
-
-    if (edit) {
-      setApps(apps.map(a => (a.id === form.id ? form : a)));
-      setEdit(false);
-    } else {
-      setApps([...apps, { ...form, id: Date.now() }]);
-    }
-    setForm(blank);
-  };
-
-  const handleEdit   = (app) => { setForm(app); setEdit(true); };
-  const handleDelete = (id) => {
-    setApps(apps.filter(a => a.id !== id));
-    if (edit && id === form.id) { setForm(blank); setEdit(false); }
-  };
-  const handleClear  = () => {
-    if (confirm('Clear all applications?')) {
-      setApps([]);
-      if (user) saveCloud(user.uid, []);
-      localStorage.removeItem(LS_KEY);
-    }
-  };
-
-  /* ---------------- CSV ---------------- */
-  const exportCSV = () => {
-    const csv  = toCSV(apps);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url; a.download = 'applications.csv'; a.click();
-    URL.revokeObjectURL(url);
-  };
-  const importCSV = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => setApps(prev => [...prev, ...fromCSV(ev.target.result)]);
-    reader.readAsText(file);
-    e.target.value = null;
-  };
-
-  /* ---------------- UI ---------------- */
-  return (
-    <div className="min-h-screen bg-gray-50 p-4 pb-24">
-      {/* Header */}
-      <header className="flex justify-between items-center mb-4">
-        <h1 className="text-3xl font-bold">Job Application Tracker</h1>
-        {user ? (
-          <div className="flex items-center gap-2">
-            <img src={user.photoURL} alt={user.displayName} className="w-8 h-8 rounded-full" />
-            <button onClick={doSignOut} className="bg-gray-600 text-white px-3 py-1 rounded-xl text-sm">Sign out</button>
-          </div>
-        ) : (
-          <button onClick={signIn} className="bg-blue-600 text-white px-4 py-2 rounded-xl">Sign in</button>
+  return(
+    <div style={{backgroundColor:bgLight,color:accent}} className="min-h-screen">
+      {/* navbar */}
+      <header style={{backgroundColor:bgDark}} className="text-[#f6e8ec] flex justify-between items-center p-4 shadow-md sticky top-0 z-10">
+        <h1 className="text-xl font-bold tracking-wide">Job Tracker</h1>
+        {user?(
+          <button onClick={()=>signOut(auth)} style={{backgroundColor:'#d7b7c8'}} className="px-3 py-1 rounded text-[#321221]">Sign out</button>
+        ):(
+          <button onClick={()=>signInWithPopup(auth,new GoogleAuthProvider())} style={{backgroundColor:'#d7b7c8'}} className="px-3 py-1 rounded text-[#321221]">Sign in</button>
         )}
       </header>
 
-      {/* Form */}
-      <form onSubmit={handleSubmit} className="grid gap-3 bg-white shadow rounded-2xl p-4 max-w-2xl mx-auto">
-        <input type="text" name="company" placeholder="Company" className="border p-2 rounded-xl" value={form.company} onChange={handleChange} required />
-        <input type="text" name="position" placeholder="Position" className="border p-2 rounded-xl" value={form.position} onChange={handleChange} required />
-        <input type="date" name="date" className="border p-2 rounded-xl" value={form.date} onChange={handleChange} />
-        <select name="status" className="border p-2 rounded-xl" value={form.status} onChange={handleChange}>
-          <option value="Applied">Applied</option>
-          <option value="Interviewing">Interviewing</option>
-          <option value="Offer">Offer</option>
-          <option value="Rejected">Rejected</option>
-        </select>
-        <textarea name="notes" rows="3" placeholder="Notes" className="border p-2 rounded-xl" value={form.notes} onChange={handleChange} />
-        <button type="submit" className="bg-blue-600 text-white rounded-xl py-2 hover:bg-blue-700 transition">{edit ? 'Update Application' : 'Add Application'}</button>
-        {edit && (
-          <button type="button" onClick={() => { setForm(blank); setEdit(false); }} className="bg-gray-400 text-white rounded-xl py-2 hover:bg-gray-500 transition">Cancel</button>
-        )}
+      {/* form */}
+      <form onSubmit={handleSubmit} style={{backgroundColor:softCard}} className="backdrop-blur-md max-w-2xl mx-auto mt-6 p-5 rounded-2xl shadow-lg">
+        <h2 className="font-semibold mb-3">{edit?'Edit':'Add'} Application</h2>
+        <div className="grid sm:grid-CSV_HEADERS-2 gap-3">
+          <input name="company" placeholder="Company" className="border p-2 rounded" value={form.company} onChange={handleChange}/>
+          <input name="position" placeholder="Position" className="border p-2 rounded" value={form.position} onChange={handleChange}/>
+          <input type="date" name="date" className="border p-2 rounded" value={form.date} onChange={handleChange}/>
+          <select name="status" className="border p-2 rounded" value={form.status} onChange={handleChange}><option>Applied</option><option>Interviewing</option><option>Offer</option><option>Rejected</option></select>
+          <select name="location" className="border p-2 rounded" value={form.location} onChange={handleChange}><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="office">Office</option></select>
+          <select name="agent" className="border p-2 rounded" value={form.agent} onChange={handleChange}><option value="Company">Direct</option><option value="Name">Agent</option></select>
+        </div>
+        <textarea name="requirements" rows="2" placeholder="Requirements (one per line)" className="border p-2 rounded w-full mt-3" value={form.requirements} onChange={handleChange}/>
+        <textarea name="optionalRequirements" rows="2" placeholder="Optional requirements" className="border p-2 rounded w-full mt-3" value={form.optionalRequirements} onChange={handleChange}/>
+        <textarea name="benefits" rows="2" placeholder="Benefits" className="border p-2 rounded w-full mt-3" value={form.benefits} onChange={handleChange}/>
+        <textarea name="fullDescription" rows="3" placeholder="Full description" className="border p-2 rounded w-full mt-3" value={form.fullDescription} onChange={handleChange}/>
+        <textarea name="notes" rows="2" placeholder="Notes" className="border p-2 rounded w-full mt-3" value={form.notes} onChange={handleChange}/>
+        <div className="flex gap-3 mt-4">
+          <button type="submit" style={{backgroundColor:accent}} className="flex-1 text-[#f7f3f5] py-2 rounded">{edit?'Update':'Add'}</button>
+          {edit&&<button type="button" onClick={()=>{setForm(blank);setEdit(false);}} className="flex-1 bg-gray-400 py-2 rounded text-white">Cancel</button>}
+        </div>
       </form>
 
-      {/* CSV controls */}
-      <div className="flex justify-center gap-4 mt-6">
-        <button onClick={exportCSV} className="bg-green-600 text-white px-4 py-2 rounded-xl hover:bg-green-700 transition">Export CSV</button>
-        <button onClick={() => fileRef.current.click()} className="bg-yellow-600 text-white px-4 py-2 rounded-xl hover:bg-yellow-700 transition">Import CSV</button>
-        <input type="file" accept=".csv" ref={fileRef} onChange={importCSV} className="hidden" />
+      {/* tools */}
+      {apps.length>0&&<div className="flex justify-center gap-4 mt-6"><button onClick={exportCsv} style={{backgroundColor:accent}} className="text-[#f7f3f5] px-4 py-2 rounded">Export CSV</button><button onClick={()=>fileInput.current.click()} style={{backgroundColor:accent}} className="text-[#f7f3f5] px-4 py-2 rounded">Import CSV</button><input type="file" accept=".csv" ref={fileInput} onChange={importCsv} className="hidden"/></div>}
+
+      {/* headings */}
+      {apps.length > 0 && (
+        <div
+          className="max-w-5xl mx-auto mt-8 px-4 py-2 font-semibold flex w-full"
+          style={{ backgroundColor: '#e9dce3', color: accent, position: 'sticky', top: '56px', zIndex: 5 }}>
+          <span className="flex-1 whitespace-nowrap">Position</span>
+          <span className="flex-1 whitespace-nowrap">Company</span>
+          <span className="flex-1 whitespace-nowrap text-right">Date</span>
+          <span className="flex-1 whitespace-nowrap text-right">Status</span>
+        </div>
+      )}
+
+      {/* list */}
+      <div className="max-w-5xl mx-auto mt-2 px-2">
+        {apps.map(app=>{
+          const isOpen=expanded===app.id;
+          const toggleSectionKey=id=>{setExpanded(p=>p===id?null:id);} ;
+          return(
+            <div key={app.id} className="mb-4 border rounded-xl shadow" style={{backgroundColor:softCard,borderColor:'#e0cdd7'}}>
+              {/* row */}
+              <button onClick={() => setExpanded(p => p === app.id ? null : app.id)} className="flex w-full text-left gap-2 p-4 hover:bg-[#f3e6ec]">
+                <span className="flex-1 font-medium truncate whitespace-nowrap">{app.position}</span>
+                <span className="flex-1 truncate whitespace-nowrap">{app.company}</span>
+                <span className="flex-1 whitespace-nowrap text-right">{app.date || '—'}</span>
+                <span className="flex-1 text-right whitespace-nowrap">{app.status}</span>
+              </button>
+              {/* details */}
+              {isOpen&&<DetailsCard app={app} accent={accent} bullets={bulletList} onEdit={()=>startEdit(app)} onDelete={()=>del(app.id)}/>}
+            </div>
+          );
+        })}
+        {apps.length>0&&<button onClick={clearAll} style={{backgroundColor:bgDark}} className="mt-4 mx-auto block rounded px-6 py-2 text-[#f7f3f5]">Clear All</button>}
       </div>
+    </div>
+  );
+}
 
-      {/* List */}
-      <div className="max-w-5xl mx-auto mt-8">
-        {apps.length === 0 ? (
-          <p className="text-center text-gray-500">No applications yet.</p>
-        ) : (
-          <div className="grid gap-4">
-            {apps.map(app => (
-              <div key={app.id} className="bg-white rounded-2xl shadow p-4 flex flex-col md:flex-row justify-between items-start md:items-center">
-                <div>
-                  <h2 className="text-xl font-semibold">{app.position} @ {app.company}</h2>
-                  <p className="text-sm text-gray-500">Applied: {app.date || '—'} | Status: {app.status}</p>
-                  {app.notes && <p className="mt-2 whitespace-pre-wrap">{app.notes}</p>}
-                </div>
-                <div className="flex gap-2 mt-3 md:mt-0">
-                  <button onClick={() => handleEdit(app)} className="bg-yellow-500 text-white rounded-xl px-4 py-2 hover:bg-yellow-600 transition">Edit</button>
-                  <button onClick={() => handleDelete(app.id)} className="bg-red-600 text-white rounded-xl px-4 py-2 hover:bg-red-700 transition">Delete</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {apps.length > 0 && (
-          <button onClick={handleClear} className="mt-6 bg-red-700 text-white rounded-xl px-6 py-2 block mx-auto hover:bg-red-800 transition">Clear All</button>
-        )}
+// collapsible inner headings component
+function DetailsCard({app,accent,bullets,onEdit,onDelete}){
+  const [sections,setSections]=useState({req:true,opt:false,ben:false,desc:false,notes:false});
+  const toggle=k=>setSections(s=>({...s,[k]:!s[k]}));
+  const H=({k,label})=>(
+    <button onClick={()=>toggle(k)} className="w-full text-left font-semibold" style={{color:accent}}>{label}<span className="float-right">{sections[k]?'-':'+'}</span></button>
+  );
+  return(
+    <div className="border-t px-4 py-3 space-y-3 text-sm" style={{borderColor:'#e0cdd7'}}>
+      <p><strong>Location:</strong> {app.location} | <strong>Agent:</strong> {app.agent}</p>
+      <div>
+        <H k="req" label="Requirements"/>
+        {sections.req&&bullets(app.requirements)}
+      </div>
+      {app.optionalRequirements&&<div><H k="opt" label="Optional Requirements"/>{sections.opt&&bullets(app.optionalRequirements)}</div>}
+      {app.benefits&&<div><H k="ben" label="Benefits"/>{sections.ben&&<p className="whitespace-pre-wrap mt-1">{app.benefits}</p>}</div>}
+      {app.fullDescription&&<div><H k="desc" label="Full Description"/>{sections.desc&&<p className="whitespace-pre-wrap mt-1">{app.fullDescription}</p>}</div>}
+      {app.notes&&<div><H k="notes" label="Notes"/>{sections.notes&&<p className="italic whitespace-pre-wrap mt-1">{app.notes}</p>}</div>}
+      <div className="flex gap-2 pt-1">
+        <button onClick={onEdit} className="flex-1 py-1 rounded" style={{backgroundColor:'#e3cada',color:'#321221'}}>Edit</button>
+        <button onClick={onDelete} className="flex-1 py-1 rounded" style={{backgroundColor:accent,color:'#f7f3f5'}}>Delete</button>
       </div>
     </div>
   );
