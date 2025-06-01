@@ -1,42 +1,144 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { initializeApp } from "firebase/app";
+import {
+  getAuth,
+  signInWithPopup,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signOut
+} from "firebase/auth";
+import {
+  getFirestore,
+  doc,
+  setDoc,
+  getDoc
+} from "firebase/firestore";
 
+/* ------------------------------------------------------------------
+   Firebase Config
+   ------------------------------------------------------------------
+   1. Create a Firebase project → https://console.firebase.google.com
+   2. Enable Authentication → Google (or Email/Password)
+   3. Enable Cloud Firestore and set rules to authenticated read/write
+   4. Replace every YOUR_* placeholder below with your project keys
+-------------------------------------------------------------------*/
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_AUTH_DOMAIN",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_STORAGE_BUCKET",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const auth        = getAuth(firebaseApp);
+const db          = getFirestore(firebaseApp);
+
+/* ------------------------------------------------------------------
+   CSV helpers
+-------------------------------------------------------------------*/
+const toCSV = (rows) => {
+  const head   = ["company", "position", "date", "status", "notes"];
+  const escape = (v) => `${v}`.replaceAll('"', '""');
+  return (
+    head.join(",") +
+    "\n" +
+    rows
+      .map((r) => head.map((h) => `"${escape(r[h] ?? "")}"`).join(","))
+      .join("\n")
+  );
+};
+
+const fromCSV = (text) => {
+  const [headerLine, ...lines] = text.trim().split(/\r?\n/);
+  const headers = headerLine.split(",");
+  return lines.map((line) => {
+    const cols = line
+      .match(/\"(?:[^\"]|\"\")*\"|[^,]+/g)
+      .map((c) => c.replace(/^\"|\"$/g, "").replace(/\"\"/g, '"'));
+    const obj = {};
+    headers.forEach((h, i) => (obj[h] = cols[i] || ""));
+    obj.id = Date.now() + Math.random();
+    return obj;
+  });
+};
+
+/* ------------------------------------------------------------------
+   Main App Component
+-------------------------------------------------------------------*/
 export default function App() {
-  // ----- Data Model -----
   const blank = {
     company: "",
     position: "",
     date: "",
     status: "Applied",
     notes: "",
-    id: null,
+    id: null
   };
 
   const [applications, setApplications] = useState([]);
-  const [form, setForm] = useState(blank);
-  const [editing, setEditing] = useState(false);
+  const [form, setForm]                 = useState(blank);
+  const [editing, setEditing]           = useState(false);
+  const [user, setUser]                 = useState(null);
 
-  // ----- Persistence -----
+  const fileInputRef = useRef();
+  const LS_KEY = "jobApplications"; // localStorage fallback key
+
+  /* -------------------  Auth handlers -------------------- */
+  const signIn = async () => {
+    const provider = new GoogleAuthProvider();
+    await signInWithPopup(auth, provider);
+  };
+
+  const doSignOut = () => signOut(auth);
+
+  /* --------------  Firestore sync helpers  --------------- */
+  const saveToCloud = async (uid, data) => setDoc(doc(db, "applications", uid), { items: data });
+  const loadFromCloud = async (uid) => {
+    const snap = await getDoc(doc(db, "applications", uid));
+    return snap.exists() ? snap.data().items : [];
+  };
+
+  /* -------------------  Initial load ---------------------- */
   useEffect(() => {
-    const stored = localStorage.getItem("jobApplications");
-    if (stored) setApplications(JSON.parse(stored));
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        const cloud = await loadFromCloud(u.uid);
+        setApplications(cloud.length ? cloud : JSON.parse(localStorage.getItem(LS_KEY) || "[]"));
+      } else {
+        setApplications(JSON.parse(localStorage.getItem(LS_KEY) || "[]"));
+      }
+    });
+    return unsub; // unsubscribe on unmount
   }, []);
 
+  /* --------------------  Persist -------------------------- */
   useEffect(() => {
-    localStorage.setItem("jobApplications", JSON.stringify(applications));
-  }, [applications]);
+    if (user) {
+      saveToCloud(user.uid, applications);
+    } else {
+      localStorage.setItem(LS_KEY, JSON.stringify(applications));
+    }
+  }, [applications, user]);
 
-  // ----- Handlers -----
-  const handleChange = (e) =>
-    setForm({ ...form, [e.target.name]: e.target.value });
+  /* ---------------  PWA service‑worker -------------------- */
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/service-worker.js").catch(console.error);
+    }
+  }, []);
+
+  /* ------------------  Form handlers ---------------------- */
+  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!form.company || !form.position) return;
 
     if (editing) {
-      setApplications(
-        applications.map((a) => (a.id === form.id ? form : a))
-      );
+      setApplications(applications.map((a) => (a.id === form.id ? form : a)));
       setEditing(false);
     } else {
       setApplications([...applications, { ...form, id: Date.now() }]);
@@ -60,22 +162,59 @@ export default function App() {
   const handleClear = () => {
     if (confirm("Clear all applications?")) {
       setApplications([]);
-      localStorage.removeItem("jobApplications");
+      if (user) saveToCloud(user.uid, []);
+      localStorage.removeItem(LS_KEY);
     }
   };
 
-  // ----- UI -----
-  return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <h1 className="text-3xl font-bold mb-4 text-center">
-        Job Application Tracker
-      </h1>
+  /* ----------------  CSV export / import ----------------- */
+  const exportCSV = () => {
+    const csv  = toCSV(applications);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = "applications.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
-      {/* Form */}
-      <form
-        onSubmit={handleSubmit}
-        className="grid gap-3 bg-white shadow rounded-2xl p-4 max-w-2xl mx-auto"
-      >
+  const importCSV = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const rows = fromCSV(ev.target.result);
+      setApplications((prev) => [...prev, ...rows]);
+    };
+    reader.readAsText(file);
+    e.target.value = null; // reset
+  };
+
+  /* ---------------------------  UI  ---------------------------- */
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 pb-24">
+      {/* ---------------- Header ---------------- */}
+      <header className="flex justify-between items-center mb-4">
+        <h1 className="text-3xl font-bold">Job Application Tracker</h1>
+
+        {user ? (
+          <div className="flex items-center gap-2">
+            <img src={user.photoURL} alt={user.displayName} className="w-8 h-8 rounded-full" />
+            <button onClick={doSignOut} className="bg-gray-600 text-white px-3 py-1 rounded-xl text-sm">
+              Sign out
+            </button>
+          </div>
+        ) : (
+          <button onClick={signIn} className="bg-blue-600 text-white px-4 py-2 rounded-xl">
+            Sign in
+          </button>
+        )}
+      </header>
+
+      {/* ------------- Form -------------- */}
+      <form onSubmit={handleSubmit} className="grid gap-3 bg-white shadow rounded-2xl p-4 max-w-2xl mx-auto">
         <input
           type="text"
           name="company"
@@ -107,10 +246,10 @@ export default function App() {
           value={form.status}
           onChange={handleChange}
         >
-          <option>Applied</option>
-          <option>Interviewing</option>
-          <option>Offer</option>
-          <option>Rejected</option>
+          <option value="Applied">Applied</option>
+          <option value="Interviewing">Interviewing</option>
+          <option value="Offer">Offer</option>
+          <option value="Rejected">Rejected</option>
         </select>
         <textarea
           name="notes"
@@ -120,10 +259,8 @@ export default function App() {
           value={form.notes}
           onChange={handleChange}
         />
-        <button
-          type="submit"
-          className="bg-blue-600 text-white rounded-xl py-2 hover:bg-blue-700 transition"
-        >
+
+        <button type="submit" className="bg-blue-600 text-white rounded-xl py-2 hover:bg-blue-700 transition">
           {editing ? "Update Application" : "Add Application"}
         </button>
         {editing && (
@@ -140,7 +277,27 @@ export default function App() {
         )}
       </form>
 
-      {/* List */}
+      {/* ------------- CSV controls -------------- */}
+      <div className="flex justify-center gap-4 mt-6">
+        <button onClick={exportCSV} className="bg-green-600 text-white px-4 py-2 rounded-xl hover:bg-green-700 transition">
+          Export CSV
+        </button>
+        <button
+          onClick={() => fileInputRef.current.click()}
+          className="bg-yellow-600 text-white px-4 py-2 rounded-xl hover:bg-yellow-700 transition"
+        >
+          Import CSV
+        </button>
+        <input
+          type="file"
+          accept=".csv"
+          ref={fileInputRef}
+          onChange={importCSV}
+          className="hidden"
+        />
+      </div>
+
+      {/* ------------- Applications list -------------- */}
       <div className="max-w-5xl mx-auto mt-8">
         {applications.length === 0 ? (
           <p className="text-center text-gray-500">No applications yet.</p>
@@ -158,9 +315,7 @@ export default function App() {
                   <p className="text-sm text-gray-500">
                     Applied: {app.date || "—"} | Status: {app.status}
                   </p>
-                  {app.notes && (
-                    <p className="mt-2 whitespace-pre-wrap">{app.notes}</p>
-                  )}
+                  {app.notes && <p className="mt-2 whitespace-pre-wrap">{app.notes}</p>}
                 </div>
                 <div className="flex gap-2 mt-3 md:mt-0">
                   <button
@@ -180,6 +335,7 @@ export default function App() {
             ))}
           </div>
         )}
+
         {applications.length > 0 && (
           <button
             onClick={handleClear}
