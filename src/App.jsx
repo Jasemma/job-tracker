@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import React, { useState, useEffect, useRef } from 'react';
-/*import { initializeApp } from 'firebase/app';
+import { initializeApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
@@ -15,7 +15,7 @@ import {
   setDoc
 } from 'firebase/firestore';
 
----------- Firebase config ---------- 
+/*---------- Firebase config ---------- */
 const firebaseConfig = {
   apiKey: 'YOUR_API_KEY',
   authDomain: 'YOUR_AUTH_DOMAIN',
@@ -24,11 +24,11 @@ const firebaseConfig = {
   messagingSenderId: 'YOUR_MSG_SENDER_ID',
   appId: 'YOUR_APP_ID'
 };
- (Replace every YOUR_* placeholder ↑ with real keys) 
+/* (Replace every YOUR_* placeholder ↑ with real keys) */
 
 const firebaseApp = initializeApp(firebaseConfig);
 const auth        = getAuth(firebaseApp);
-const db          = getFirestore(firebaseApp); */
+const db          = getFirestore(firebaseApp);
 
 /* ---------- CSV helpers ---------- */
 const toCSV = (rows) => {
