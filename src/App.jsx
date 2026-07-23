@@ -53,6 +53,15 @@ const attachLegacyEvents = (apps, events=[]) => apps.map(app => {
   }));
   return { ...app, interviews:[...app.interviews,...migrated] };
 });
+const readCloudDoc = async reference => {
+  try {
+    const snapshot = await getDoc(reference);
+    return snapshot.exists() ? snapshot.data() : {};
+  } catch (error) {
+    console.warn('One cloud storage location could not be read', error);
+    return {};
+  }
+};
 const esc = value => String(value ?? '').replace(/"/g,'""').replace(/\n/g,'\\n');
 const toCsv = rows => CSV_HEADERS.join(',')+'\n'+rows.map(r => CSV_HEADERS.map(c => `"${esc(r[c])}"`).join(',')).join('\n');
 const parseCsv = str => {
@@ -93,19 +102,17 @@ export default function App(){
     }
     const cached = safeJson(localStorage.getItem(USER_LS(currentUser.uid)));
     try {
-      const [currentSnap, legacySnap] = await Promise.all([
-        getDoc(doc(db,'applications',currentUser.uid)),
-        getDoc(doc(db,'data',currentUser.uid)),
+      const [currentData, legacyData] = await Promise.all([
+        readCloudDoc(doc(db,'applications',currentUser.uid)),
+        readCloudDoc(doc(db,'data',currentUser.uid)),
       ]);
-      const currentData = currentSnap.exists() ? currentSnap.data() : {};
-      const legacyData = legacySnap.exists() ? legacySnap.data() : {};
       const current = currentData.items || currentData.apps || [];
       const legacy = legacyData.apps || legacyData.items || [];
       const merged = attachLegacyEvents(mergeApps(guest, cached, legacy, current), [...(legacyData.events || []),...(currentData.events || [])]);
       setApps(merged);
       localStorage.setItem(USER_LS(currentUser.uid), JSON.stringify(merged));
-      if (merged.length && (!currentSnap.exists() || current.length !== merged.length)) {
-        await setDoc(doc(db,'applications',currentUser.uid), { items:merged, updatedAt:new Date().toISOString(), schemaVersion:2 }, { merge:true });
+      if (merged.length && legacy.length !== merged.length) {
+        await setDoc(doc(db,'data',currentUser.uid), { apps:merged, updatedAt:new Date().toISOString(), schemaVersion:3 }, { merge:true });
       }
       setSaveState('Saved to cloud and this device');
     } catch (error) {
@@ -123,7 +130,7 @@ export default function App(){
     setSaveState('Saving…');
     const timer = setTimeout(async () => {
       try {
-        await setDoc(doc(db,'applications',user.uid), { items:apps, updatedAt:new Date().toISOString(), schemaVersion:2 }, { merge:true });
+        await setDoc(doc(db,'data',user.uid), { apps, updatedAt:new Date().toISOString(), schemaVersion:3 }, { merge:true });
         setSaveState('Saved to cloud and this device');
       } catch (error) {
         console.error('Unable to save cloud data', error);
