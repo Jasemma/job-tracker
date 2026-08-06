@@ -145,6 +145,12 @@ export default function App(){
   }, []);
 
   const allInterviews = useMemo(() => apps.flatMap(app => app.interviews.map(event => ({ ...event, appId:app.id, company:app.company, position:app.position }))).sort((a,b) => new Date(a.start)-new Date(b.start)), [apps]);
+  const groupedApps = useMemo(() => Object.fromEntries(STATUSES.map(status => [
+    status,
+    apps
+      .filter(app => app.status === status)
+      .sort((a,b) => String(b.date || '').localeCompare(String(a.date || ''))),
+  ])), [apps]);
   const handleChange = e => setForm(current => ({ ...current, [e.target.name]:e.target.value }));
   const handleSubmit = e => {
     e.preventDefault();
@@ -207,15 +213,53 @@ export default function App(){
         <div className="flex gap-3 mt-4"><button type="submit" style={{backgroundColor:accent}} className="flex-1 text-white py-2 rounded">{edit?'Update':'Add'}</button>{edit&&<button type="button" onClick={()=>{setForm(blankApplication);setEdit(false);}} className="flex-1 bg-gray-400 py-2 rounded text-white">Cancel</button>}</div>
       </form>
       <div className="flex justify-center gap-3 mt-6"><button onClick={exportCsv} className="bg-[#5c2439] text-white px-4 py-2 rounded">Export CSV</button><button onClick={()=>fileInput.current.click()} className="bg-[#5c2439] text-white px-4 py-2 rounded">Import CSV</button><input type="file" accept=".csv" ref={fileInput} onChange={importCsv} className="hidden"/></div>
-      <div className="max-w-5xl mx-auto mt-7 px-2">
+      <div className="max-w-5xl mx-auto mt-7 px-2 space-y-5">
         {!apps.length && <p className="text-center py-12">No applications saved yet.</p>}
-        {apps.map(app => <div key={app.id} className="mb-4 border rounded-xl shadow bg-white/70 border-[#e0cdd7]">
-          <button onClick={()=>setExpanded(value=>value===app.id?null:app.id)} className="grid grid-cols-4 w-full text-left gap-2 p-4 hover:bg-[#f3e6ec]"><span className="font-medium truncate">{app.position}</span><span className="truncate">{app.company}</span><span className="text-right">{app.date||'—'}</span><span className="text-right">{app.status}</span></button>
-          {expanded===app.id && <DetailsCard app={app} onEdit={()=>startEdit(app)} onDelete={()=>removeApp(app.id)} onAddInterview={()=>{setInterview({...blankInterview,appId:String(app.id)});setTab('calendar');window.scrollTo({top:0});}}/>}
-        </div>)}
+        {!!apps.length && STATUSES.map(status => <StatusGroup
+          key={status}
+          status={status}
+          apps={groupedApps[status]}
+          expanded={expanded}
+          setExpanded={setExpanded}
+          onEdit={startEdit}
+          onDelete={removeApp}
+          onAddInterview={app=>{setInterview({...blankInterview,appId:String(app.id)});setTab('calendar');window.scrollTo({top:0});}}
+        />)}
       </div>
     </> : <CalendarView apps={apps} interview={interview} setInterview={setInterview} editingInterview={editingInterview} cancelEdit={()=>{setInterview(blankInterview);setEditingInterview(null);}} submit={addOrUpdateInterview} month={month} setMonth={setMonth} events={allInterviews} onEdit={editInterview} onDelete={deleteInterview}/>}
   </div>;
+}
+
+const STATUS_STYLES = {
+  Interested:'bg-[#efe4cf] text-[#5b4420]',
+  Applied:'bg-[#dce8f2] text-[#284b66]',
+  Interviewing:'bg-[#e8ddf1] text-[#54386b]',
+  Offer:'bg-[#dcecdf] text-[#285735]',
+  Rejected:'bg-[#f0dede] text-[#6d3030]',
+  Withdrawn:'bg-[#e7e3e5] text-[#554b50]',
+};
+
+function StatusGroup({status,apps,expanded,setExpanded,onEdit,onDelete,onAddInterview}){
+  const [open,setOpen] = useState(apps.length > 0);
+  return <section className="overflow-hidden rounded-2xl border border-[#e0cdd7] bg-white/60 shadow-sm">
+    <button onClick={()=>setOpen(value=>!value)} className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-white/40" aria-expanded={open}>
+      <span className="flex items-center gap-3"><span className={`rounded-full px-3 py-1 text-sm font-semibold ${STATUS_STYLES[status]}`}>{status}</span><span className="text-sm text-[#6f5360]">{apps.length} {apps.length===1?'job':'jobs'}</span></span>
+      <span className="text-xl" aria-hidden="true">{open?'−':'+'}</span>
+    </button>
+    {open && <div className="border-t border-[#e0cdd7]">
+      {!apps.length ? <p className="px-4 py-5 text-sm text-[#806a74]">No {status.toLowerCase()} jobs.</p> : <>
+        <div className="grid grid-cols-3 gap-2 bg-[#f1e8ed] px-4 py-2 text-xs font-semibold sm:grid-cols-4">
+          <span>Position</span><span>Company</span><span className="text-right">Date</span><span className="hidden text-right sm:block">Status</span>
+        </div>
+        {apps.map(app => <div key={app.id} className="border-t border-[#eadce3] first:border-t-0">
+          <button onClick={()=>setExpanded(value=>value===app.id?null:app.id)} className="grid w-full grid-cols-3 gap-2 p-4 text-left hover:bg-[#f3e6ec] sm:grid-cols-4">
+            <span className="truncate font-medium">{app.position}</span><span className="truncate">{app.company}</span><span className="text-right">{app.date||'—'}</span><span className="hidden text-right sm:block">{app.status}</span>
+          </button>
+          {expanded===app.id && <DetailsCard app={app} onEdit={()=>onEdit(app)} onDelete={()=>onDelete(app.id)} onAddInterview={()=>onAddInterview(app)}/>}
+        </div>)}
+      </>}
+    </div>}
+  </section>;
 }
 
 function DetailsCard({app,onEdit,onDelete,onAddInterview}){
