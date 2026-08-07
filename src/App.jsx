@@ -20,16 +20,16 @@ const db = getFirestore(firebaseApp);
 
 const LS = 'jobApplications';
 const USER_LS = uid => `jobTracker:${uid}`;
-const STATUSES = ['Interested', 'Applied', 'Interviewing', 'Offer', 'Rejected', 'Withdrawn'];
+const STATUSES = ['Applied', 'Interviewing', 'Offer', 'Rejected', 'Withdrawn'];
 const STAGES = ['Recruiter screen', 'Hiring manager', 'Technical interview', 'Assessment', 'Second interview', 'Final interview', 'Other'];
-const CSV_HEADERS = ['company','position','date','location','agent','status','requirements','optionalRequirements','benefits','fullDescription','notes'];
-const blankApplication = { company:'', position:'', date:'', location:'remote', agent:'Company', status:'Applied', requirements:'', optionalRequirements:'', benefits:'', fullDescription:'', notes:'', id:null, interviews:[], statusHistory:[] };
+const CSV_HEADERS = ['company','position','date','location','agent','status','salary','requirements','optionalRequirements','benefits','fullDescription','notes'];
+const blankApplication = { company:'', position:'', date:'', location:'remote', agent:'Company', status:'Applied', salary:'60000', requirements:'', optionalRequirements:'', benefits:'', fullDescription:'', notes:'', id:null, interviews:[], statusHistory:[] };
 const blankInterview = { appId:'', stage:'Recruiter screen', start:'', end:'', location:'', notes:'' };
 const uid = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const safeJson = (value, fallback=[]) => { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } };
 const localDateTime = value => value ? new Date(value).toLocaleString('en-GB', { dateStyle:'medium', timeStyle:'short' }) : '—';
 const dateKey = value => value ? value.slice(0, 10) : '';
-const normalize = app => ({ ...blankApplication, ...app, id:app.id || uid(), interviews:Array.isArray(app.interviews) ? app.interviews : [], statusHistory:Array.isArray(app.statusHistory) ? app.statusHistory : [] });
+const normalize = app => ({ ...blankApplication, ...app, status:app.status === 'Interested' ? 'Applied' : (app.status || 'Applied'), salary:app.salary || '60000', id:app.id || uid(), interviews:Array.isArray(app.interviews) ? app.interviews : [], statusHistory:Array.isArray(app.statusHistory) ? app.statusHistory : [] });
 const mergeApps = (...groups) => {
   const map = new Map();
   groups.flat().filter(Boolean).forEach(raw => {
@@ -205,6 +205,11 @@ export default function App(){
           <select name="location" className="border p-2 rounded" value={form.location} onChange={handleChange}><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="office">Office</option></select>
           <select name="agent" className="border p-2 rounded" value={form.agent} onChange={handleChange}><option value="Company">Direct</option><option value="Agent">Agent</option></select>
         </div>
+        <label className="block mt-3">
+          <span className="flex justify-between text-sm font-medium"><span>Salary range</span><span>£{Number(form.salary).toLocaleString('en-GB')}</span></span>
+          <input type="range" name="salary" min="60000" max="100000" step="1000" value={form.salary} onChange={handleChange} className="w-full accent-[#5c2439]"/>
+          <span className="flex justify-between text-xs text-gray-600"><span>£60k</span><span>£100k</span></span>
+        </label>
         <textarea name="requirements" rows="2" placeholder="Requirements (one per line)" className="border p-2 rounded w-full mt-3" value={form.requirements} onChange={handleChange}/>
         <textarea name="optionalRequirements" rows="2" placeholder="Optional requirements" className="border p-2 rounded w-full mt-3" value={form.optionalRequirements} onChange={handleChange}/>
         <textarea name="benefits" rows="2" placeholder="Benefits" className="border p-2 rounded w-full mt-3" value={form.benefits} onChange={handleChange}/>
@@ -231,7 +236,6 @@ export default function App(){
 }
 
 const STATUS_STYLES = {
-  Interested:'bg-[#efe4cf] text-[#5b4420]',
   Applied:'bg-[#dce8f2] text-[#284b66]',
   Interviewing:'bg-[#e8ddf1] text-[#54386b]',
   Offer:'bg-[#dcecdf] text-[#285735]',
@@ -268,7 +272,7 @@ function DetailsCard({app,onEdit,onDelete,onAddInterview}){
   const bullets = text => text ? <ul className="list-disc list-inside mt-1">{text.split(/\r?\n/).filter(Boolean).map((item,index)=><li key={index}>{item.trim()}</li>)}</ul> : <p className="text-gray-500 mt-1">None entered</p>;
   const timeline = [...app.statusHistory.map(item=>({...item,label:item.status,type:'status'})),...app.interviews.map(item=>({...item,at:item.start,label:item.stage,type:'interview'}))].sort((a,b)=>new Date(a.at)-new Date(b.at));
   return <div className="border-t px-4 py-3 space-y-3 text-sm border-[#e0cdd7]">
-    <p><strong>Location:</strong> {app.location} · <strong>Source:</strong> {app.agent}</p>
+    <p><strong>Location:</strong> {app.location} · <strong>Source:</strong> {app.agent} · <strong>Salary:</strong> £{Number(app.salary || 60000).toLocaleString('en-GB')}</p>
     <Section name="req" label="Requirements">{bullets(app.requirements)}</Section>
     {app.optionalRequirements&&<Section name="opt" label="Optional Requirements">{bullets(app.optionalRequirements)}</Section>}
     {app.benefits&&<Section name="ben" label="Benefits"><p className="whitespace-pre-wrap mt-1">{app.benefits}</p></Section>}
