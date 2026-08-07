@@ -19,17 +19,18 @@ const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
 
 const LS = 'jobApplications';
+const THEME_LS = 'jobTrackerThemeHue';
 const USER_LS = uid => `jobTracker:${uid}`;
 const STATUSES = ['Applied', 'Interviewing', 'Offer', 'Rejected', 'Withdrawn'];
 const STAGES = ['Recruiter screen', 'Hiring manager', 'Technical interview', 'Assessment', 'Second interview', 'Final interview', 'Other'];
-const CSV_HEADERS = ['company','position','date','location','agent','status','salary','requirements','optionalRequirements','benefits','fullDescription','notes'];
-const blankApplication = { company:'', position:'', date:'', location:'remote', agent:'Company', status:'Applied', salary:'60000', requirements:'', optionalRequirements:'', benefits:'', fullDescription:'', notes:'', id:null, interviews:[], statusHistory:[] };
+const CSV_HEADERS = ['company','position','date','location','agent','status','salaryMin','salaryMax','requirements','optionalRequirements','benefits','fullDescription','notes'];
+const blankApplication = { company:'', position:'', date:'', location:'remote', agent:'Company', status:'Applied', salaryMin:'60000', salaryMax:'100000', requirements:'', optionalRequirements:'', benefits:'', fullDescription:'', notes:'', id:null, interviews:[], statusHistory:[] };
 const blankInterview = { appId:'', stage:'Recruiter screen', start:'', end:'', location:'', notes:'' };
 const uid = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const safeJson = (value, fallback=[]) => { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } };
 const localDateTime = value => value ? new Date(value).toLocaleString('en-GB', { dateStyle:'medium', timeStyle:'short' }) : '—';
 const dateKey = value => value ? value.slice(0, 10) : '';
-const normalize = app => ({ ...blankApplication, ...app, status:app.status === 'Interested' ? 'Applied' : (app.status || 'Applied'), salary:app.salary || '60000', id:app.id || uid(), interviews:Array.isArray(app.interviews) ? app.interviews : [], statusHistory:Array.isArray(app.statusHistory) ? app.statusHistory : [] });
+const normalize = app => ({ ...blankApplication, ...app, status:app.status === 'Interested' ? 'Applied' : (app.status || 'Applied'), salaryMin:String(app.salaryMin || app.salary || '60000'), salaryMax:String(app.salaryMax || '100000'), id:app.id || uid(), interviews:Array.isArray(app.interviews) ? app.interviews : [], statusHistory:Array.isArray(app.statusHistory) ? app.statusHistory : [] });
 const mergeApps = (...groups) => {
   const map = new Map();
   groups.flat().filter(Boolean).forEach(raw => {
@@ -86,6 +87,7 @@ export default function App(){
   const [tab,setTab] = useState('applications');
   const [month,setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [saveState,setSaveState] = useState('Loading saved data…');
+  const [themeHue,setThemeHue] = useState(() => Number(localStorage.getItem(THEME_LS) || 335));
   const fileInput = useRef();
   const hydrated = useRef(false);
 
@@ -144,6 +146,8 @@ export default function App(){
     if ('serviceWorker' in navigator) navigator.serviceWorker.register(`${import.meta.env.BASE_URL}service-worker.js`).catch(console.error);
   }, []);
 
+  useEffect(() => localStorage.setItem(THEME_LS, String(themeHue)), [themeHue]);
+
   const allInterviews = useMemo(() => apps.flatMap(app => app.interviews.map(event => ({ ...event, appId:app.id, company:app.company, position:app.position }))).sort((a,b) => new Date(a.start)-new Date(b.start)), [apps]);
   const groupedApps = useMemo(() => Object.fromEntries(STATUSES.map(status => [
     status,
@@ -182,15 +186,19 @@ export default function App(){
   const exportCsv = () => { const blob=new Blob([toCsv(apps)],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='applications.csv'; a.click(); URL.revokeObjectURL(url); };
   const importCsv = e => { const file=e.target.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=event=>setApps(current=>mergeApps(current,parseCsv(event.target.result))); reader.readAsText(file); e.target.value=''; };
 
-  const accent='#5c2439', dark='#321221', card='rgba(255,255,255,0.72)';
-  return <div style={{backgroundColor:'#f7f3f5',color:accent}} className="min-h-screen pb-12">
+  const accent=`hsl(${themeHue} 43% 25%)`, dark=`hsl(${themeHue} 47% 13%)`, card='rgba(255,255,255,0.72)';
+  const themeStyles = { '--accent':accent, '--dark':dark, '--soft':`hsl(${themeHue} 27% 78%)`, '--pale':`hsl(${themeHue} 24% 94%)`, '--border':`hsl(${themeHue} 23% 84%)`, backgroundColor:`hsl(${themeHue} 23% 96%)`, color:accent };
+  return <div style={themeStyles} className="min-h-screen pb-12">
     <header style={{backgroundColor:dark}} className="text-[#f6e8ec] sticky top-0 z-20 shadow-md">
       <div className="max-w-5xl mx-auto flex justify-between items-center p-4">
-        <div><h1 className="text-xl font-bold">Job Tracker</h1><p className="text-xs text-[#e8cad8]">{saveState}</p></div>
-        {user ? <button onClick={()=>signOut(auth)} className="px-3 py-1 rounded bg-[#d7b7c8] text-[#321221]">Sign out</button> : <button onClick={()=>signInWithPopup(auth,new GoogleAuthProvider())} className="px-3 py-1 rounded bg-[#d7b7c8] text-[#321221]">Sign in</button>}
+        <div><h1 className="text-xl font-bold">Job Tracker</h1><p className="text-xs text-white/75">{saveState}</p></div>
+        <div className="flex items-center gap-3">
+          <label className="block text-xs"><span className="hidden mb-1 sm:block">Theme</span><input aria-label="Theme colour" type="range" min="0" max="355" step="5" value={themeHue} onChange={e=>setThemeHue(Number(e.target.value))} className="h-2 w-20 cursor-pointer appearance-none rounded-full sm:w-28" style={{background:'linear-gradient(to right,#d44,#dd4,#4b5,#4bd,#46d,#b4d,#d46,#d44)'}}/></label>
+          {user ? <button onClick={()=>signOut(auth)} className="px-3 py-1 rounded bg-[var(--soft)] text-[var(--dark)]">Sign out</button> : <button onClick={()=>signInWithPopup(auth,new GoogleAuthProvider())} className="px-3 py-1 rounded bg-[var(--soft)] text-[var(--dark)]">Sign in</button>}
+        </div>
       </div>
       <nav className="max-w-5xl mx-auto flex">
-        {['applications','calendar'].map(value => <button key={value} onClick={()=>setTab(value)} className={`flex-1 py-3 capitalize ${tab===value?'bg-[#5c2439] font-semibold':'bg-[#321221]'}`}>{value}</button>)}
+        {['applications','calendar'].map(value => <button key={value} onClick={()=>setTab(value)} className={`flex-1 py-3 capitalize ${tab===value?'bg-[var(--accent)] font-semibold':'bg-[var(--dark)]'}`}>{value}</button>)}
       </nav>
     </header>
 
@@ -205,11 +213,18 @@ export default function App(){
           <select name="location" className="border p-2 rounded" value={form.location} onChange={handleChange}><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="office">Office</option></select>
           <select name="agent" className="border p-2 rounded" value={form.agent} onChange={handleChange}><option value="Company">Direct</option><option value="Agent">Agent</option></select>
         </div>
-        <label className="block mt-3">
-          <span className="flex justify-between text-sm font-medium"><span>Salary range</span><span>£{Number(form.salary).toLocaleString('en-GB')}</span></span>
-          <input type="range" name="salary" min="60000" max="100000" step="5000" value={form.salary} onChange={handleChange} className="w-full accent-[#5c2439]"/>
+        <fieldset className="mt-3 rounded-xl border border-[var(--border)] p-3">
+          <legend className="px-1 text-sm font-semibold">Salary range</legend>
+          <label className="block">
+            <span className="flex justify-between text-sm"><span>Bottom end</span><strong>£{Number(form.salaryMin).toLocaleString('en-GB')}</strong></span>
+            <input type="range" name="salaryMin" min="60000" max={Number(form.salaryMax)-5000} step="5000" value={form.salaryMin} onChange={handleChange} className="w-full accent-[var(--accent)]"/>
+          </label>
+          <label className="mt-3 block">
+            <span className="flex justify-between text-sm"><span>Top end</span><strong>£{Number(form.salaryMax).toLocaleString('en-GB')}</strong></span>
+            <input type="range" name="salaryMax" min={Number(form.salaryMin)+5000} max="100000" step="5000" value={form.salaryMax} onChange={handleChange} className="w-full accent-[var(--accent)]"/>
+          </label>
           <span className="flex justify-between text-xs text-gray-600"><span>£60k</span><span>£100k</span></span>
-        </label>
+        </fieldset>
         <textarea name="requirements" rows="2" placeholder="Requirements (one per line)" className="border p-2 rounded w-full mt-3" value={form.requirements} onChange={handleChange}/>
         <textarea name="optionalRequirements" rows="2" placeholder="Optional requirements" className="border p-2 rounded w-full mt-3" value={form.optionalRequirements} onChange={handleChange}/>
         <textarea name="benefits" rows="2" placeholder="Benefits" className="border p-2 rounded w-full mt-3" value={form.benefits} onChange={handleChange}/>
@@ -217,7 +232,7 @@ export default function App(){
         <textarea name="notes" rows="2" placeholder="Notes" className="border p-2 rounded w-full mt-3" value={form.notes} onChange={handleChange}/>
         <div className="flex gap-3 mt-4"><button type="submit" style={{backgroundColor:accent}} className="flex-1 text-white py-2 rounded">{edit?'Update':'Add'}</button>{edit&&<button type="button" onClick={()=>{setForm(blankApplication);setEdit(false);}} className="flex-1 bg-gray-400 py-2 rounded text-white">Cancel</button>}</div>
       </form>
-      <div className="flex justify-center gap-3 mt-6"><button onClick={exportCsv} className="bg-[#5c2439] text-white px-4 py-2 rounded">Export CSV</button><button onClick={()=>fileInput.current.click()} className="bg-[#5c2439] text-white px-4 py-2 rounded">Import CSV</button><input type="file" accept=".csv" ref={fileInput} onChange={importCsv} className="hidden"/></div>
+      <div className="flex justify-center gap-3 mt-6"><button onClick={exportCsv} className="bg-[var(--accent)] text-white px-4 py-2 rounded">Export CSV</button><button onClick={()=>fileInput.current.click()} className="bg-[var(--accent)] text-white px-4 py-2 rounded">Import CSV</button><input type="file" accept=".csv" ref={fileInput} onChange={importCsv} className="hidden"/></div>
       <div className="max-w-5xl mx-auto mt-7 px-2 space-y-5">
         {!apps.length && <p className="text-center py-12">No applications saved yet.</p>}
         {!!apps.length && STATUSES.map(status => <StatusGroup
@@ -245,18 +260,18 @@ const STATUS_STYLES = {
 
 function StatusGroup({status,apps,expanded,setExpanded,onEdit,onDelete,onAddInterview}){
   const [open,setOpen] = useState(apps.length > 0);
-  return <section className="overflow-hidden rounded-2xl border border-[#e0cdd7] bg-white/60 shadow-sm">
+  return <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-white/60 shadow-sm">
     <button onClick={()=>setOpen(value=>!value)} className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-white/40" aria-expanded={open}>
       <span className="flex items-center gap-3"><span className={`rounded-full px-3 py-1 text-sm font-semibold ${STATUS_STYLES[status]}`}>{status}</span><span className="text-sm text-[#6f5360]">{apps.length} {apps.length===1?'job':'jobs'}</span></span>
       <span className="text-xl" aria-hidden="true">{open?'−':'+'}</span>
     </button>
-    {open && <div className="border-t border-[#e0cdd7]">
+    {open && <div className="border-t border-[var(--border)]">
       {!apps.length ? <p className="px-4 py-5 text-sm text-[#806a74]">No {status.toLowerCase()} jobs.</p> : <>
-        <div className="grid grid-cols-3 gap-2 bg-[#f1e8ed] px-4 py-2 text-xs font-semibold sm:grid-cols-4">
+        <div className="grid grid-cols-3 gap-2 bg-[var(--pale)] px-4 py-2 text-xs font-semibold sm:grid-cols-4">
           <span>Position</span><span>Company</span><span className="text-right">Date</span><span className="hidden text-right sm:block">Status</span>
         </div>
-        {apps.map(app => <div key={app.id} className="border-t border-[#eadce3] first:border-t-0">
-          <button onClick={()=>setExpanded(value=>value===app.id?null:app.id)} className="grid w-full grid-cols-3 gap-2 p-4 text-left hover:bg-[#f3e6ec] sm:grid-cols-4">
+        {apps.map(app => <div key={app.id} className="border-t border-[var(--border)] first:border-t-0">
+          <button onClick={()=>setExpanded(value=>value===app.id?null:app.id)} className="grid w-full grid-cols-3 gap-2 p-4 text-left hover:bg-[var(--pale)] sm:grid-cols-4">
             <span className="truncate font-medium">{app.position}</span><span className="truncate">{app.company}</span><span className="text-right">{app.date||'—'}</span><span className="hidden text-right sm:block">{app.status}</span>
           </button>
           {expanded===app.id && <DetailsCard app={app} onEdit={()=>onEdit(app)} onDelete={()=>onDelete(app.id)} onAddInterview={()=>onAddInterview(app)}/>}
@@ -268,18 +283,18 @@ function StatusGroup({status,apps,expanded,setExpanded,onEdit,onDelete,onAddInte
 
 function DetailsCard({app,onEdit,onDelete,onAddInterview}){
   const [open,setOpen]=useState({req:true,opt:false,ben:false,desc:false,notes:false,timeline:true});
-  const Section=({name,label,children}) => <div><button onClick={()=>setOpen(value=>({...value,[name]:!value[name]}))} className="w-full text-left font-semibold text-[#5c2439]">{label}<span className="float-right">{open[name]?'-':'+'}</span></button>{open[name]&&children}</div>;
+  const Section=({name,label,children}) => <div><button onClick={()=>setOpen(value=>({...value,[name]:!value[name]}))} className="w-full text-left font-semibold text-[var(--accent)]">{label}<span className="float-right">{open[name]?'-':'+'}</span></button>{open[name]&&children}</div>;
   const bullets = text => text ? <ul className="list-disc list-inside mt-1">{text.split(/\r?\n/).filter(Boolean).map((item,index)=><li key={index}>{item.trim()}</li>)}</ul> : <p className="text-gray-500 mt-1">None entered</p>;
   const timeline = [...app.statusHistory.map(item=>({...item,label:item.status,type:'status'})),...app.interviews.map(item=>({...item,at:item.start,label:item.stage,type:'interview'}))].sort((a,b)=>new Date(a.at)-new Date(b.at));
-  return <div className="border-t px-4 py-3 space-y-3 text-sm border-[#e0cdd7]">
-    <p><strong>Location:</strong> {app.location} · <strong>Source:</strong> {app.agent} · <strong>Salary:</strong> £{Number(app.salary || 60000).toLocaleString('en-GB')}</p>
+  return <div className="border-t px-4 py-3 space-y-3 text-sm border-[var(--border)]">
+    <p><strong>Location:</strong> {app.location} · <strong>Source:</strong> {app.agent} · <strong>Salary:</strong> £{Number(app.salaryMin || app.salary || 60000).toLocaleString('en-GB')}–£{Number(app.salaryMax || 100000).toLocaleString('en-GB')}</p>
     <Section name="req" label="Requirements">{bullets(app.requirements)}</Section>
     {app.optionalRequirements&&<Section name="opt" label="Optional Requirements">{bullets(app.optionalRequirements)}</Section>}
     {app.benefits&&<Section name="ben" label="Benefits"><p className="whitespace-pre-wrap mt-1">{app.benefits}</p></Section>}
     {app.fullDescription&&<Section name="desc" label="Full Description"><p className="whitespace-pre-wrap mt-1">{app.fullDescription}</p></Section>}
     {app.notes&&<Section name="notes" label="Notes"><p className="whitespace-pre-wrap mt-1">{app.notes}</p></Section>}
-    <Section name="timeline" label="Application Timeline"><ol className="border-l-2 border-[#d7b7c8] ml-2 mt-2 pl-4 space-y-3">{timeline.length?timeline.map(item=><li key={`${item.type}-${item.id}`}><span className="font-medium">{item.label}</span><br/><span className="text-gray-600">{localDateTime(item.at)}</span></li>):<li className="text-gray-500">No timeline events yet</li>}</ol></Section>
-    <div className="grid sm:grid-cols-3 gap-2 pt-1"><button onClick={onAddInterview} className="py-2 rounded bg-[#d7b7c8] text-[#321221]">Add interview</button><button onClick={onEdit} className="py-2 rounded bg-[#e3cada] text-[#321221]">Edit application</button><button onClick={onDelete} className="py-2 rounded bg-[#5c2439] text-white">Delete</button></div>
+    <Section name="timeline" label="Application Timeline"><ol className="border-l-2 border-[var(--soft)] ml-2 mt-2 pl-4 space-y-3">{timeline.length?timeline.map(item=><li key={`${item.type}-${item.id}`}><span className="font-medium">{item.label}</span><br/><span className="text-gray-600">{localDateTime(item.at)}</span></li>):<li className="text-gray-500">No timeline events yet</li>}</ol></Section>
+    <div className="grid sm:grid-cols-3 gap-2 pt-1"><button onClick={onAddInterview} className="py-2 rounded bg-[var(--soft)] text-[var(--dark)]">Add interview</button><button onClick={onEdit} className="py-2 rounded bg-[var(--pale)] text-[var(--dark)]">Edit application</button><button onClick={onDelete} className="py-2 rounded bg-[var(--accent)] text-white">Delete</button></div>
   </div>;
 }
 
@@ -301,12 +316,12 @@ function CalendarView({apps,interview,setInterview,editingInterview,cancelEdit,s
         <input placeholder="Location or video link" value={interview.location} onChange={e=>setInterview({...interview,location:e.target.value})} className="border p-2 rounded self-end"/>
         <input placeholder="Preparation notes" value={interview.notes} onChange={e=>setInterview({...interview,notes:e.target.value})} className="border p-2 rounded self-end"/>
       </div>
-      <div className="flex gap-2 mt-4"><button className="px-5 py-2 rounded bg-[#5c2439] text-white">{editingInterview?'Update interview':'Save interview'}</button>{editingInterview&&<button type="button" onClick={cancelEdit} className="px-5 py-2 rounded bg-gray-400 text-white">Cancel</button>}</div>
+      <div className="flex gap-2 mt-4"><button className="px-5 py-2 rounded bg-[var(--accent)] text-white">{editingInterview?'Update interview':'Save interview'}</button>{editingInterview&&<button type="button" onClick={cancelEdit} className="px-5 py-2 rounded bg-gray-400 text-white">Cancel</button>}</div>
     </form>
     <section className="mt-6 bg-white/70 rounded-2xl shadow p-3 sm:p-5 overflow-x-auto">
-      <div className="flex justify-between items-center mb-4"><button onClick={()=>setMonth(new Date(year,monthIndex-1,1))} className="px-3 py-2 rounded bg-[#e9dce3]">‹</button><h2 className="font-semibold text-lg">{month.toLocaleDateString('en-GB',{month:'long',year:'numeric'})}</h2><button onClick={()=>setMonth(new Date(year,monthIndex+1,1))} className="px-3 py-2 rounded bg-[#e9dce3]">›</button></div>
-      <div className="grid grid-cols-7 min-w-[700px]">{['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(day=><div key={day} className="p-2 font-semibold text-center bg-[#e9dce3]">{day}</div>)}{cells.map((day,index)=>{const key=day?`${year}-${String(monthIndex+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`:'';const dayEvents=events.filter(event=>dateKey(event.start)===key);return <div key={index} className="min-h-28 border border-[#eadce3] p-1 bg-white/60"><span className="text-xs">{day}</span>{dayEvents.map(event=><button key={event.id} onClick={()=>onEdit(event)} className="block w-full text-left mt-1 p-1 rounded bg-[#5c2439] text-white text-xs"><span className="font-semibold">{event.start.slice(11,16)} {event.stage}</span><br/>{event.company}</button>)}</div>;})}</div>
+      <div className="flex justify-between items-center mb-4"><button onClick={()=>setMonth(new Date(year,monthIndex-1,1))} className="px-3 py-2 rounded bg-[var(--pale)]">‹</button><h2 className="font-semibold text-lg">{month.toLocaleDateString('en-GB',{month:'long',year:'numeric'})}</h2><button onClick={()=>setMonth(new Date(year,monthIndex+1,1))} className="px-3 py-2 rounded bg-[var(--pale)]">›</button></div>
+      <div className="grid grid-cols-7 min-w-[700px]">{['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(day=><div key={day} className="p-2 font-semibold text-center bg-[var(--pale)]">{day}</div>)}{cells.map((day,index)=>{const key=day?`${year}-${String(monthIndex+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`:'';const dayEvents=events.filter(event=>dateKey(event.start)===key);return <div key={index} className="min-h-28 border border-[var(--border)] p-1 bg-white/60"><span className="text-xs">{day}</span>{dayEvents.map(event=><button key={event.id} onClick={()=>onEdit(event)} className="block w-full text-left mt-1 p-1 rounded bg-[var(--accent)] text-white text-xs"><span className="font-semibold">{event.start.slice(11,16)} {event.stage}</span><br/>{event.company}</button>)}</div>;})}</div>
     </section>
-    <section className="mt-6 bg-white/70 rounded-2xl shadow p-5"><h2 className="font-semibold mb-3">Upcoming interviews</h2>{upcoming.length?upcoming.map(event=><div key={event.id} className="border-b border-[#eadce3] py-3 flex flex-col sm:flex-row sm:items-center gap-2"><div className="flex-1"><strong>{event.stage}</strong> · {event.position} at {event.company}<br/><span className="text-sm">{localDateTime(event.start)}{event.location?` · ${event.location}`:''}</span>{event.notes&&<p className="text-sm mt-1">{event.notes}</p>}</div><button onClick={()=>onEdit(event)} className="px-3 py-1 rounded bg-[#e3cada]">Edit</button><button onClick={()=>onDelete(event)} className="px-3 py-1 rounded bg-[#5c2439] text-white">Delete</button></div>):<p className="text-gray-500">No upcoming interviews saved.</p>}</section>
+    <section className="mt-6 bg-white/70 rounded-2xl shadow p-5"><h2 className="font-semibold mb-3">Upcoming interviews</h2>{upcoming.length?upcoming.map(event=><div key={event.id} className="border-b border-[var(--border)] py-3 flex flex-col sm:flex-row sm:items-center gap-2"><div className="flex-1"><strong>{event.stage}</strong> · {event.position} at {event.company}<br/><span className="text-sm">{localDateTime(event.start)}{event.location?` · ${event.location}`:''}</span>{event.notes&&<p className="text-sm mt-1">{event.notes}</p>}</div><button onClick={()=>onEdit(event)} className="px-3 py-1 rounded bg-[var(--pale)]">Edit</button><button onClick={()=>onDelete(event)} className="px-3 py-1 rounded bg-[var(--accent)] text-white">Delete</button></div>):<p className="text-gray-500">No upcoming interviews saved.</p>}</section>
   </main>;
 }
