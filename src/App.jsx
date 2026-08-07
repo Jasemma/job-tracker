@@ -207,7 +207,7 @@ export default function App(){
         </div>
         <label className="block mt-3">
           <span className="flex justify-between text-sm font-medium"><span>Salary range</span><span>£{Number(form.salary).toLocaleString('en-GB')}</span></span>
-          <input type="range" name="salary" min="60000" max="100000" step="1000" value={form.salary} onChange={handleChange} className="w-full accent-[#5c2439]"/>
+          <input type="range" name="salary" min="60000" max="100000" step="5000" value={form.salary} onChange={handleChange} className="w-full accent-[#5c2439]"/>
           <span className="flex justify-between text-xs text-gray-600"><span>£60k</span><span>£100k</span></span>
         </label>
         <textarea name="requirements" rows="2" placeholder="Requirements (one per line)" className="border p-2 rounded w-full mt-3" value={form.requirements} onChange={handleChange}/>
